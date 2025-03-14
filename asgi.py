@@ -20,17 +20,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
-app.add_middleware(SessionMiddleware, secret_key="your-session-secret")
+app.add_middleware(SessionMiddleware, secret_key="")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-DATABASE_URL = "postgresql://c103470_vkudryavtsev_u6607_ru:exPYuHFoK7JwmOet@postgres.c103470.h2:5432/c103470_vkudryavtsev_u6607_ru"
+DATABASE_URL = ""
 APP_IP = "127.0.4.102"
 APP_PORT = 54949
-SECRET_KEY = "your-secret-key"
+SECRET_KEY = ""
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
-RECAPTCHA_SECRET_KEY = "6LewhusqAAAAADDx-ca0v0PbSvA5jwUNE-8HvXEG" 
+RECAPTCHA_SECRET_KEY = "" 
 
 rooms: Dict[str, List[Dict]] = {}
 clients: Dict[str, List[WebSocket]] = {}
@@ -229,7 +229,6 @@ async def update_settings(
         if not updates:  
             return {"message": "Изменений не внесено"}
 
-        # Формируем запрос
         query = "UPDATE users SET " + ", ".join(f"{k} = ${i+1}" for i, k in enumerate(updates.keys())) + f" WHERE login = ${len(updates) + 1}"
         values = list(updates.values()) + [current_user["login"]]
         await conn.execute(query, *values)
