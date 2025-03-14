@@ -19,8 +19,6 @@
 
     if (!token || !username) {
         console.error("Token or username missing, redirecting to login");
-        console.log("Token at check:", token);
-        console.log("Username at check:", username);
         window.location.href = "/login";
     } else {
         console.log("Token:", token);
@@ -42,14 +40,9 @@
     }
 
     async function loadRooms() {
-        console.log("Loading rooms with token:", token);
         const headers = { "Authorization": `Bearer ${token}` };
-        console.log("Request headers:", headers);
-        const response = await fetch("/rooms", {
-            headers: headers
-        });
+        const response = await fetch("/rooms", { headers });
         if (!response.ok) {
-            console.error("Failed to load rooms:", response.status, response.statusText);
             alert("Ошибка загрузки комнат. Возможно, токен истек.");
             logout();
             return;
@@ -74,29 +67,13 @@
             alert("Введите название комнаты!");
             return;
         }
-        if (!token) {
-            console.error("No token available for room creation");
-            alert("Токен отсутствует. Пожалуйста, войдите заново.");
-            logout();
-            return;
-        }
-        console.log("Creating room with token:", token);
         const response = await fetch("/rooms", {
             method: "POST",
-            headers: { 
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`
-            },
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
             body: JSON.stringify({ name: roomName })
         });
         if (!response.ok) {
-            console.error("Failed to create room:", response.status, response.statusText);
-            if (response.status === 401) {
-                alert("Ошибка авторизации. Токен истек или недействителен.");
-                logout();
-            } else {
-                alert("Ошибка создания комнаты.");
-            }
+            alert("Ошибка создания комнаты.");
             return;
         }
         const result = await response.json();
@@ -107,21 +84,12 @@
 
     async function deleteRoom(roomName) {
         if (!confirm(`Вы уверены, что хотите удалить комнату "${roomName}"?`)) return;
-        console.log("Deleting room with token:", token);
         const response = await fetch(`/rooms/${roomName}`, {
             method: "DELETE",
             headers: { "Authorization": `Bearer ${token}` }
         });
         if (!response.ok) {
-            console.error("Failed to delete room:", response.status, response.statusText);
-            if (response.status === 401) {
-                alert("Ошибка авторизации. Токен истек или недействителен.");
-                logout();
-            } else if (response.status === 403) {
-                alert("Требуются права администратора.");
-            } else {
-                alert("Ошибка удаления комнаты.");
-            }
+            alert("Ошибка удаления комнаты.");
             return;
         }
         const result = await response.json();
@@ -129,20 +97,14 @@
         if (currentRoom === roomName) {
             currentRoom = "General";
             connect();
-            updateCurrentRoomDisplay(); 
+            updateCurrentRoomDisplay();
         }
         await loadRooms();
     }
 
     async function loadUsers() {
-        console.log("Loading users with token:", token);
-        const response = await fetch("/users", {
-            headers: { "Authorization": `Bearer ${token}` }
-        });
-        if (!response.ok) {
-            console.error("Failed to load users:", response.status, response.statusText);
-            return;
-        }
+        const response = await fetch("/users", { headers: { "Authorization": `Bearer ${token}` } });
+        if (!response.ok) return;
         const result = await response.json();
         const userList = document.getElementById("user-list");
         userList.innerHTML = "";
@@ -165,17 +127,12 @@
             alert("Заполните все поля!");
             return;
         }
-        console.log("Adding user with token:", token);
         const response = await fetch("/users", {
             method: "POST",
-            headers: { 
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`
-            },
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
             body: JSON.stringify({ login, full_name: fullName, password, role: "user" })
         });
         if (!response.ok) {
-            console.error("Failed to add user:", response.status, response.statusText);
             alert("Ошибка добавления пользователя.");
             return;
         }
@@ -189,13 +146,11 @@
 
     async function deleteUser(login) {
         if (!confirm(`Вы уверены, что хотите удалить пользователя "${login}"?`)) return;
-        console.log("Deleting user with token:", token);
         const response = await fetch(`/users/${login}`, {
             method: "DELETE",
             headers: { "Authorization": `Bearer ${token}` }
         });
         if (!response.ok) {
-            console.error("Failed to delete user:", response.status, response.statusText);
             alert("Ошибка удаления пользователя.");
             return;
         }
@@ -211,7 +166,7 @@
                 ws.close();
             }
             setTimeout(connect, 100);
-            updateCurrentRoomDisplay(); 
+            updateCurrentRoomDisplay();
             loadRooms();
         }
     }
@@ -227,7 +182,6 @@
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.close();
         }
-        console.log("Connecting to:", `wss://vkudryavtsev.u6607.ru/ws/${currentRoom}/${username}?token=${token}`);
         ws = new WebSocket(`wss://vkudryavtsev.u6607.ru/ws/${currentRoom}/${username}?token=${token}`);
 
         ws.onmessage = function(event) {
@@ -250,19 +204,21 @@
         ws.onopen = function() {
             console.log("WebSocket connected");
             document.getElementById("messageInput").disabled = false;
+            document.getElementById("mediaInput").disabled = false;
             document.getElementById("sendBtn").disabled = false;
+        };
+
+        ws.onclose = function(event) {
+            console.log("WebSocket closed:", event);
+            document.getElementById("messageInput").disabled = true;
+            document.getElementById("mediaInput").disabled = true;
+            document.getElementById("sendBtn").disabled = true;
         };
 
         ws.onerror = function(error) {
             console.error("WebSocket error:", error);
             alert("Ошибка подключения. Возможно, токен истек.");
             logout();
-        };
-
-        ws.onclose = function(event) {
-            console.log("WebSocket closed:", event);
-            document.getElementById("messageInput").disabled = true;
-            document.getElementById("sendBtn").disabled = true;
         };
     }
 
@@ -272,13 +228,28 @@
         msg.className = "message";
         msg.setAttribute("data-id", data.id);
         const canDelete = data.username === username || window.currentUserRole === "admin";
-        console.log("Can delete message:", canDelete, "Username:", data.username, "Role:", window.currentUserRole);
+        // Обрезаем наносекунды из timestamp
+        const timestamp = data.timestamp.split('.')[0];
+        let mediaContent = "";
+        if (data.media_url) {
+            const ext = data.media_url.split('.').pop().toLowerCase();
+            if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+                mediaContent = `<img src="${data.media_url}" class="img-fluid mt-2" style="max-width: 300px;" alt="Media">`;
+            } else if (['mp4', 'webm'].includes(ext)) {
+                mediaContent = `<video controls class="mt-2" style="max-width: 300px;"><source src="${data.media_url}" type="video/${ext}"></video>`;
+            } else if (['mp3', 'wav'].includes(ext)) {
+                mediaContent = `<audio controls class="mt-2"><source src="${data.media_url}" type="audio/${ext}"></audio>`;
+            } else {
+                mediaContent = `<a href="${data.media_url}" target="_blank" class="mt-2">Скачать файл</a>`;
+            }
+        }
         msg.innerHTML = `
             <img src="${data.avatar || '/static/avatars/default.png'}" class="avatar" alt="${data.username[0]}">
             <div class="content">
-                <strong>${data.full_name} (${data.username})</strong> <small class="text-muted">[${data.timestamp}]</small>
+                <strong>${data.full_name} (${data.username})</strong> <small class="text-muted">[${timestamp}]</small>
                 ${canDelete ? `<button class="btn btn-danger btn-sm float-end" onclick="deleteMessage(${data.id})">Удалить</button>` : ""}
-                <br>${data.message}
+                <br>${data.message || ""}
+                ${mediaContent}
             </div>
         `;
         messagesDiv.appendChild(msg);
@@ -295,35 +266,48 @@
 
     async function deleteMessage(messageId) {
         if (!confirm("Вы уверены, что хотите удалить это сообщение?")) return;
-        console.log("Deleting message with token:", token);
         const response = await fetch(`/messages/${messageId}`, {
             method: "DELETE",
             headers: { "Authorization": `Bearer ${token}` }
         });
         if (!response.ok) {
-            console.error("Failed to delete message:", response.status, response.statusText);
-            if (response.status === 401) {
-                alert("Ошибка авторизации. Токен истек или недействителен.");
-                logout();
-            } else if (response.status === 403) {
-                alert("Вы не можете удалять чужие сообщения.");
-            } else {
-                alert("Ошибка удаления сообщения.");
-            }
+            alert("Ошибка удаления сообщения.");
             return;
         }
         const result = await response.json();
         alert(result.message);
     }
 
-    function sendMessage() {
+    async function sendMessage() {
         const input = document.getElementById("messageInput");
-        if (ws && ws.readyState === WebSocket.OPEN && input.value) {
-            ws.send(JSON.stringify({message: input.value}));
+        const mediaInput = document.getElementById("mediaInput");
+        const message = input.value;
+        let mediaUrl = null;
+
+        if (mediaInput.files.length > 0) {
+            const formData = new FormData();
+            formData.append("file", mediaInput.files[0]);
+            formData.append("room", currentRoom);
+            const response = await fetch("/upload", {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}` },
+                body: formData
+            });
+            if (!response.ok) {
+                const error = await response.json();
+                alert(`Ошибка загрузки файла: ${error.detail || "Неизвестная ошибка"}`);
+                return;
+            }
+            const result = await response.json();
+            mediaUrl = result.media_url;
+        }
+
+        if (ws && ws.readyState === WebSocket.OPEN && (message || mediaUrl)) {
+            ws.send(JSON.stringify({ message: message || "", media_url: mediaUrl }));
             input.value = "";
+            mediaInput.value = "";
         } else {
-            console.log("WebSocket is not open. State:", ws ? ws.readyState : "undefined");
-            alert("Нельзя отправить сообщение: соединение закрыто. Переподключитесь.");
+            alert("Нельзя отправить сообщение: соединение закрыто.");
         }
     }
 

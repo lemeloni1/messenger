@@ -2,7 +2,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPExcept
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from starlette.middleware.sessions import SessionMiddleware  
+from starlette.middleware.sessions import SessionMiddleware  # Добавляем импорт
 from typing import List, Dict, Optional
 import asyncpg
 import json
@@ -74,52 +74,6 @@ manager = ConnectionManager()
 
 async def init_db():
     conn = await asyncpg.connect(DATABASE_URL)
-    await conn.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            login TEXT UNIQUE NOT NULL,
-            full_name TEXT NOT NULL,
-            hashed_password TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'user'
-        );
-        CREATE TABLE IF NOT EXISTS rooms (
-            id SERIAL PRIMARY KEY,
-            name TEXT UNIQUE NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS messages (
-            id SERIAL PRIMARY KEY,
-            room TEXT NOT NULL,
-            username TEXT NOT NULL,
-            message TEXT NOT NULL,
-            timestamp TIMESTAMP NOT NULL
-        );
-    ''')
-    await conn.execute("INSERT INTO rooms (name) VALUES ('General') ON CONFLICT (name) DO NOTHING")
-    try:
-        await conn.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS room TEXT NOT NULL DEFAULT 'General'")
-    except asyncpg.exceptions.DuplicateColumnError:
-        logger.info("Столбец 'room' уже существует")
-
-    try:
-        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'")
-        logger.info("Столбец 'role' добавлен или уже существует")
-    except asyncpg.exceptions.DuplicateColumnError:
-        logger.info("Столбец 'role' уже существует")
-
-    admin_exists = await conn.fetchrow("SELECT login FROM users WHERE login = 'admin'")
-    if not admin_exists:
-        hashed_password = hash_password("dohGie5oot0rah8A") 
-        await conn.execute(
-            "INSERT INTO users (login, full_name, hashed_password, role) VALUES ($1, $2, $3, $4)",
-            "admin", "Администратор", hashed_password, "admin"
-        )
-        logger.info("Создан начальный пользователь 'admin'")
-    else:
-        await conn.execute("UPDATE users SET role = 'admin' WHERE login = 'admin'")
-        logger.info("Роль 'admin' установлена для существующего пользователя 'admin'")
-
-    await conn.execute("UPDATE users SET role = 'user' WHERE role IS NULL AND login != 'admin'")
-    await conn.close()
 
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()
@@ -457,6 +411,26 @@ async def broadcast(room: str, message: dict):
 async def broadcast_system(room: str, message: str):
     await broadcast(room, {"type": "system", "message": message})
 
+@app.post("/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    room: str = Form(...),
+    current_user: dict = Depends(get_current_user)
+):
+    file_size = (await file.read()).__sizeof__()
+    await file.seek(0)
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="Файл слишком большой. Максимальный размер: 50 МБ.")
+
+    upload_dir = "static/uploads"
+    os.makedirs(upload_dir, exist_ok=True)
+    file_extension = file.filename.split('.')[-1]
+    file_path = os.path.join(upload_dir, f"{current_user['login']}_{datetime.utcnow().isoformat()}.{file_extension}")
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+    media_url = f"/static/uploads/{os.path.basename(file_path)}"
+    return {"media_url": media_url}
+
 @app.websocket("/ws/{room}/{username}")
 async def websocket_endpoint(websocket: WebSocket, room: str, username: str, token: str = None):
     current_user = await get_current_user(token=token)
@@ -467,9 +441,8 @@ async def websocket_endpoint(websocket: WebSocket, room: str, username: str, tok
     logger.info(f"User '{username}' connected to room '{room}'. Clients in room: {len(clients[room])}")
     try:
         await broadcast_system(room, f"{username} присоединился к чату")
-        
         conn = await asyncpg.connect(DATABASE_URL)
-        messages = await conn.fetch("SELECT id, username, message, timestamp FROM messages WHERE room = $1 ORDER BY timestamp", room)
+        messages = await conn.fetch("SELECT id, username, message, timestamp, media_url FROM messages WHERE room = $1 ORDER BY timestamp", room)
         await websocket.send_text(json.dumps({
             "type": "history",
             "messages": [
@@ -479,7 +452,8 @@ async def websocket_endpoint(websocket: WebSocket, room: str, username: str, tok
                     "full_name": (await conn.fetchval("SELECT full_name FROM users WHERE login = $1", m["username"])) or m["username"],
                     "message": m["message"],
                     "timestamp": m["timestamp"].isoformat(),
-                    "avatar": (await conn.fetchval("SELECT avatar FROM users WHERE login = $1", m["username"])) or "/static/avatars/default.png"
+                    "avatar": (await conn.fetchval("SELECT avatar FROM users WHERE login = $1", m["username"])) or "/static/avatars/default.png",
+                    "media_url": m["media_url"]
                 } for m in messages
             ]
         }))
@@ -488,12 +462,13 @@ async def websocket_endpoint(websocket: WebSocket, room: str, username: str, tok
         while True:
             data = await websocket.receive_text()
             message_data = json.loads(data)
-            message = message_data["message"]
+            message = message_data.get("message", "")
+            media_url = message_data.get("media_url")
             conn = await asyncpg.connect(DATABASE_URL)
             timestamp = datetime.utcnow()
             message_id = await conn.fetchval(
-                "INSERT INTO messages (room, username, message, timestamp) VALUES ($1, $2, $3, $4) RETURNING id",
-                room, username, message, timestamp
+                "INSERT INTO messages (room, username, message, timestamp, media_url) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+                room, username, message, timestamp, media_url
             )
             user_full_name = await conn.fetchval("SELECT full_name FROM users WHERE login = $1", username) or username
             user_avatar = await conn.fetchval("SELECT avatar FROM users WHERE login = $1", username) or "/static/avatars/default.png"
@@ -505,7 +480,8 @@ async def websocket_endpoint(websocket: WebSocket, room: str, username: str, tok
                 "full_name": user_full_name,
                 "message": message,
                 "timestamp": timestamp.isoformat(),
-                "avatar": user_avatar
+                "avatar": user_avatar,
+                "media_url": media_url
             })
     except WebSocketDisconnect:
         if room in clients and websocket in clients[room]:

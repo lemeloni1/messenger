@@ -60,7 +60,6 @@
             <div id="messages" class="message-list"></div>
             <div class="input-group mt-3">
                 <input type="text" id="messageInput" class="form-control" placeholder="Введите сообщение" disabled>
-                <input type="file" id="mediaInput" class="form-control" disabled>
                 <button onclick="sendMessage()" class="btn btn-primary" disabled id="sendBtn">Отправить</button>
             </div>
         </div>
